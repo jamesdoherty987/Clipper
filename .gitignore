@@ -1,0 +1,11 @@
+.env
+data/media/**
+data/store.json
+data/*.tmp
+**/__pycache__/
+**/.DS_Store
+frontend/node_modules/
+frontend/dist/
+*.pyc
+.venv/
+venv/

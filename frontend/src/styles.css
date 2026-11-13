@@ -1,0 +1,596 @@
+:root {
+  --ap-text: #e2e8f0;
+  --ap-text-muted: #94a3b8;
+  --ap-border: rgba(148,163,184,0.22);
+  --ap-bg: #0b1220;
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; }
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: radial-gradient(1200px 600px at 10% -10%, rgba(34,197,94,0.12), transparent),
+              linear-gradient(180deg, #070b14, #0b1220 40%, #0a1628);
+  color: var(--ap-text);
+}
+.ap-view { padding: 1.25rem 1.5rem 2rem; max-width: 1440px; margin: 0 auto; }
+.ap-view-header { margin-bottom: 0.25rem; }
+.ap-view-header-leading { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.ap-btn {
+  appearance: none; border: 1px solid var(--ap-border); background: rgba(15,23,42,0.8);
+  color: var(--ap-text); border-radius: 10px; padding: 0.55rem 0.85rem; font: inherit;
+  font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem;
+  text-decoration: none;
+}
+.ap-btn.primary { background: linear-gradient(135deg, #4ade80, #22c55e); color: #052e16; border: 0; }
+.ap-btn.secondary { background: rgba(15,23,42,0.75); }
+.ap-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.ap-loading { padding: 2rem; color: var(--ap-text-muted); }
+.ap-empty-state { text-align: center; padding: 1.5rem 1rem; color: var(--ap-text-muted); }
+.ap-empty-state__title { color: var(--ap-text); margin: 0.5rem 0 0.35rem; }
+.ap-empty-state__desc { margin: 0; }
+.ap-empty-state__icon { font-size: 1.6rem; opacity: 0.8; }
+
+/* GTA Content Studio — polished admin UX */
+
+.gta-studio {
+  --gta-accent: #4ade80;
+  --gta-accent-2: #22d3ee;
+  --gta-accent-soft: rgba(74, 222, 128, 0.14);
+  --gta-warn: #fbbf24;
+  --gta-danger: #f87171;
+  --gta-card: rgba(15, 23, 42, 0.62);
+  --gta-card-border: rgba(148, 163, 184, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 1440px;
+}
+
+.gta-studio .gta-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.gta-studio .gta-header h1 {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: -0.03em;
+}
+
+.gta-studio .gta-header-copy {
+  margin: 0.35rem 0 0;
+  color: var(--ap-text-muted);
+  font-size: 0.92rem;
+  max-width: 46rem;
+  line-height: 1.45;
+}
+
+.gta-studio .gta-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.3rem;
+  background: rgba(17, 24, 39, 0.94);
+  border: 1px solid var(--ap-border);
+  border-radius: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  backdrop-filter: blur(10px);
+}
+
+.gta-studio .gta-nav button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ap-text-muted);
+  padding: 0.55rem 0.8rem;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.gta-studio .gta-nav button:hover {
+  color: var(--ap-text);
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.gta-studio .gta-nav button.active {
+  color: #052e16;
+  background: linear-gradient(135deg, #86efac, #4ade80);
+  box-shadow: 0 8px 20px rgba(74, 222, 128, 0.18);
+}
+
+.gta-studio .gta-nav .gta-nav-short { display: none; }
+
+@media (max-width: 768px) {
+  .gta-studio .gta-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    position: relative;
+    top: auto;
+  }
+  .gta-studio .gta-nav::-webkit-scrollbar { display: none; }
+  .gta-studio .gta-nav .gta-nav-label { display: none; }
+  .gta-studio .gta-nav .gta-nav-short { display: inline; }
+}
+
+.gta-provider-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.gta-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 720px) {
+  .gta-stats { grid-template-columns: 1fr; }
+}
+
+.gta-stat {
+  border: 1px solid var(--gta-card-border);
+  border-radius: 16px;
+  padding: 1.05rem 1.15rem;
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(74, 222, 128, 0.16), transparent 55%),
+    var(--gta-card);
+}
+
+.gta-stat .gta-stat-value {
+  font-size: 1.95rem;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.gta-stat .gta-stat-label {
+  margin-top: 0.3rem;
+  color: var(--ap-text-muted);
+  font-size: 0.82rem;
+}
+
+.gta-pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+@media (max-width: 820px) {
+  .gta-pipeline-grid { grid-template-columns: 1fr; }
+}
+
+.gta-pipeline-card {
+  border: 1px solid var(--gta-card-border);
+  border-radius: 16px;
+  padding: 1.15rem 1.2rem;
+  background: var(--gta-card);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gta-pipeline-card:hover {
+  border-color: rgba(74, 222, 128, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+}
+
+.gta-pipeline-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.08rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.gta-pipeline-card p {
+  margin: 0;
+  color: var(--ap-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.gta-pipeline-card .gta-pipe-tag {
+  display: inline-block;
+  margin-top: 0.8rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gta-accent);
+}
+
+.gta-panel {
+  border: 1px solid var(--gta-card-border);
+  border-radius: 16px;
+  padding: 1.05rem 1.15rem;
+  background: var(--gta-card);
+}
+
+.gta-panel h2 {
+  margin: 0 0 0.85rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.gta-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.gta-panel-head h2 { margin: 0; }
+
+.gta-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.gta-step-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--gta-card-border);
+  color: var(--ap-text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.gta-step-pill.active {
+  color: #052e16;
+  background: var(--gta-accent);
+  border-color: transparent;
+}
+
+.gta-step-pill.done {
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.gta-job-list,
+.gta-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.gta-job-row,
+.gta-card {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  border: 1px solid var(--gta-card-border);
+  border-radius: 14px;
+  padding: 0.9rem 0.95rem;
+  background: rgba(2, 6, 23, 0.38);
+}
+
+.gta-job-row-main,
+.gta-card-main { min-width: 0; flex: 1; }
+
+.gta-job-row h4,
+.gta-card h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+}
+
+.gta-meta {
+  color: var(--ap-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.gta-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.58rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid var(--ap-border);
+  white-space: nowrap;
+}
+
+.gta-badge.ok { color: #86efac; border-color: rgba(74, 222, 128, 0.35); background: rgba(74, 222, 128, 0.08); }
+.gta-badge.warn { color: #fde68a; border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08); }
+.gta-badge.danger { color: #fca5a5; border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.08); }
+.gta-badge.muted { color: var(--ap-text-muted); }
+
+.gta-progress {
+  margin-top: 0.5rem;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.gta-progress > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--gta-accent), var(--gta-accent-2));
+  border-radius: inherit;
+  transition: width 0.35s ease;
+}
+
+.gta-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 820px) {
+  .gta-form-grid { grid-template-columns: 1fr; }
+}
+
+.gta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.gta-field.full { grid-column: 1 / -1; }
+
+.gta-field label {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ap-text-muted);
+}
+
+.gta-field input,
+.gta-field select,
+.gta-field textarea {
+  width: 100%;
+  border: 1px solid var(--ap-border);
+  border-radius: 11px;
+  background: rgba(2, 6, 23, 0.58);
+  color: var(--ap-text);
+  padding: 0.58rem 0.72rem;
+  font: inherit;
+}
+
+.gta-field textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.gta-field input:focus,
+.gta-field select:focus,
+.gta-field textarea:focus {
+  outline: none;
+  border-color: rgba(74, 222, 128, 0.55);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.12);
+}
+
+.gta-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.86rem;
+  color: var(--ap-text);
+}
+
+.gta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+  align-items: center;
+}
+
+.gta-script-preview {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 0.92rem;
+  color: var(--ap-text);
+  background: rgba(2, 6, 23, 0.45);
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 0.95rem 1rem;
+}
+
+.gta-video-frame {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 9 / 16;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--gta-card-border);
+}
+
+.gta-video-frame video,
+.gta-video-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.gta-thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #0b1220;
+  border: 1px solid var(--gta-card-border);
+  flex-shrink: 0;
+}
+
+.gta-review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 0.9rem;
+}
+
+.gta-review-card {
+  border: 1px solid var(--gta-card-border);
+  border-radius: 16px;
+  padding: 0.9rem;
+  background: rgba(2, 6, 23, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.gta-review-card .gta-video-frame { max-width: none; }
+
+.gta-score {
+  font-weight: 750;
+  color: var(--gta-accent);
+  font-size: 0.92rem;
+}
+
+.gta-two-col {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 0.9rem;
+}
+
+@media (max-width: 980px) {
+  .gta-two-col { grid-template-columns: 1fr; }
+}
+
+.gta-note {
+  font-size: 0.82rem;
+  color: var(--ap-text-muted);
+  line-height: 1.5;
+  margin: 0.45rem 0 0;
+}
+
+.gta-topic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.gta-topic-card {
+  text-align: left;
+  border: 1px solid var(--gta-card-border);
+  border-radius: 14px;
+  padding: 0.85rem;
+  background: rgba(2, 6, 23, 0.4);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.gta-topic-card:hover {
+  border-color: rgba(74, 222, 128, 0.45);
+  transform: translateY(-1px);
+}
+
+.gta-topic-card.active {
+  border-color: rgba(74, 222, 128, 0.65);
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.gta-topic-card h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+}
+
+.gta-inline-cost {
+  font-size: 0.78rem;
+  color: var(--ap-text-muted);
+}
+
+.gta-regen {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.4rem;
+  align-items: end;
+}
+
+@media (max-width: 520px) {
+  .gta-regen { grid-template-columns: 1fr; }
+}
+
+.gta-seg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.7rem;
+  margin-top: 0.75rem;
+}
+
+.gta-seg-card {
+  border: 1px solid var(--gta-card-border);
+  border-radius: 14px;
+  padding: 0.8rem;
+  background: rgba(2, 6, 23, 0.4);
+  display: flex;
+  gap: 0.7rem;
+}
+
+.gta-seg-card h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+}
+
+.gta-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.gta-tag {
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.12);
+  color: #67e8f9;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+}
+
+.gta-upload-btn {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.gta-upload-btn[aria-disabled="true"],
+.gta-upload-btn:has(input:disabled) {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.gta-toast {
+  position: sticky; top: 12px; z-index: 50; margin: 0 auto 0.75rem;
+  max-width: 520px; text-align: center; padding: 0.7rem 1rem;
+  border-radius: 12px; background: rgba(34,197,94,0.16);
+  border: 1px solid rgba(74,222,128,0.35); color: #bbf7d0;
+}
+
