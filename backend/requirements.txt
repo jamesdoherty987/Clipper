@@ -6,3 +6,5 @@ openai==1.54.4
 numpy>=1.26.4
 requests>=2.32.0
 resend>=2.0.0
+yt-dlp>=2024.10.22
+Pillow>=10.0.0

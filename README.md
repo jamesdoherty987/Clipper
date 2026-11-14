@@ -54,5 +54,5 @@ Open http://localhost:5177
 
 - Media is stored under `data/media/` and served at `/media/...`
 - Job state is in `data/store.json`
-- URL scraping is intentionally disabled — upload files you have rights to
+- YouTube / direct media URLs can be imported for clip jobs (via yt-dlp) — only use content you have rights to
 - Keep BookedForYou on Render; run heavy FFmpeg jobs here

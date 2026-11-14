@@ -337,6 +337,7 @@ class Store:
             "name": (payload.get("name") or "Export").strip(),
             "pipeline": (payload.get("pipeline") or "explainer").strip(),
             "job_id": (payload.get("job_id") or "").strip(),
+            "clip_id": (payload.get("clip_id") or "").strip(),
             "script_id": (payload.get("script_id") or "").strip(),
             "recording_id": (payload.get("recording_id") or "").strip(),
             "url": (payload.get("url") or "").strip(),
@@ -363,6 +364,64 @@ class Store:
     def update_gta_export(self, export_id: str, payload: Dict[str, Any]):
         return self._update("gta_exports", export_id, payload)
 
+    def set_export_status(self, export_id: str, status: str):
+        """Approve/reject an export and keep the linked streamer clip in sync."""
+        export = self.update_gta_export(export_id, {"status": status})
+        if not export:
+            return None
+        clip_status = {"approved": "approved", "rejected": "rejected"}.get(status)
+        if not clip_status:
+            return export
+        clip_id = (export.get("clip_id") or "").strip()
+        if clip_id:
+            self.update_gta_clip(clip_id, {"status": clip_status})
+            return export
+        url = (export.get("url") or "").strip()
+        job_id = (export.get("job_id") or "").strip()
+        if not url and not job_id:
+            return export
+
+        def _sync(data: Dict[str, Any]):
+            for clip in data.get("gta_clips") or []:
+                if clip_id and clip.get("id") == clip_id:
+                    clip["status"] = clip_status
+                    clip["updated_at"] = _now()
+                elif url and clip.get("url") == url:
+                    clip["status"] = clip_status
+                    clip["updated_at"] = _now()
+                elif job_id and clip.get("job_id") == job_id and clip.get("title") == export.get("title"):
+                    clip["status"] = clip_status
+                    clip["updated_at"] = _now()
+
+        self.mutate(_sync)
+        return export
+
+    def set_clip_status(self, clip_id: str, status: str):
+        """Approve/reject a clip and keep matching review exports in sync."""
+        clip = self.update_gta_clip(clip_id, {"status": status})
+        if not clip:
+            return None
+        export_status = {"approved": "approved", "rejected": "rejected", "pending": "needs_review"}.get(
+            status, "needs_review"
+        )
+        url = (clip.get("url") or "").strip()
+        job_id = (clip.get("job_id") or "").strip()
+
+        def _sync(data: Dict[str, Any]):
+            for exp in data.get("gta_exports") or []:
+                if exp.get("clip_id") == clip_id:
+                    exp["status"] = export_status
+                    exp["updated_at"] = _now()
+                elif url and exp.get("url") == url:
+                    exp["status"] = export_status
+                    exp["updated_at"] = _now()
+                elif job_id and exp.get("job_id") == job_id and exp.get("title") == clip.get("title"):
+                    exp["status"] = export_status
+                    exp["updated_at"] = _now()
+
+        self.mutate(_sync)
+        return clip
+
     def create_gta_clip(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         item = {
             "id": _id("gtaclip"),
@@ -388,6 +447,157 @@ class Store:
 
     def update_gta_clip(self, clip_id: str, payload: Dict[str, Any]):
         return self._update("gta_clips", clip_id, payload)
+
+    def _collect_media_urls(self, *items: Dict[str, Any]) -> List[str]:
+        urls: List[str] = []
+        for item in items:
+            if not item:
+                continue
+            for key in ("url", "thumbnail_url"):
+                u = (item.get(key) or "").strip()
+                if u:
+                    urls.append(u)
+        return urls
+
+    def delete_gta_export(self, export_id: str, *, delete_files: bool = True) -> Optional[Dict[str, Any]]:
+        export = self.get_gta_export(export_id)
+        if not export:
+            return None
+        removed = {"export": None, "clip": None, "deleted_files": 0}
+
+        def _del(data: Dict[str, Any]):
+            exports = data.get("gta_exports") or []
+            data["gta_exports"] = [e for e in exports if e.get("id") != export_id]
+            removed["export"] = export
+            clip_id = (export.get("clip_id") or "").strip()
+            if clip_id:
+                clips = data.get("gta_clips") or []
+                kept = []
+                for c in clips:
+                    if c.get("id") == clip_id:
+                        removed["clip"] = dict(c)
+                    else:
+                        kept.append(c)
+                data["gta_clips"] = kept
+
+        self.mutate(_del)
+        if delete_files:
+            from app.r2_compat import delete_media_url
+            for url in self._collect_media_urls(removed.get("export") or {}, removed.get("clip") or {}):
+                if delete_media_url(url):
+                    removed["deleted_files"] += 1
+        return removed
+
+    def delete_gta_clip(self, clip_id: str, *, delete_files: bool = True) -> Optional[Dict[str, Any]]:
+        clip = None
+        for c in self.list_gta_studio().get("clips") or []:
+            if c.get("id") == clip_id:
+                clip = c
+                break
+        if not clip:
+            return None
+        removed = {"clip": clip, "exports": [], "deleted_files": 0}
+
+        def _del(data: Dict[str, Any]):
+            data["gta_clips"] = [c for c in (data.get("gta_clips") or []) if c.get("id") != clip_id]
+            kept_exports = []
+            for e in data.get("gta_exports") or []:
+                if e.get("clip_id") == clip_id or (
+                    e.get("job_id") == clip.get("job_id")
+                    and e.get("url")
+                    and e.get("url") == clip.get("url")
+                ):
+                    removed["exports"].append(dict(e))
+                else:
+                    kept_exports.append(e)
+            data["gta_exports"] = kept_exports
+
+        self.mutate(_del)
+        if delete_files:
+            from app.r2_compat import delete_media_url
+            urls = self._collect_media_urls(clip, *removed["exports"])
+            for url in urls:
+                if delete_media_url(url):
+                    removed["deleted_files"] += 1
+        return removed
+
+    def delete_gta_job(self, job_id: str, *, delete_files: bool = True) -> Optional[Dict[str, Any]]:
+        """Delete a run and all clips/exports produced by it."""
+        job = self.get_gta_job(job_id)
+        if not job:
+            return None
+        removed = {
+            "job": job,
+            "clips": [],
+            "exports": [],
+            "deleted_files": 0,
+        }
+
+        def _del(data: Dict[str, Any]):
+            data["gta_jobs"] = [j for j in (data.get("gta_jobs") or []) if j.get("id") != job_id]
+            kept_clips = []
+            for c in data.get("gta_clips") or []:
+                if c.get("job_id") == job_id:
+                    removed["clips"].append(dict(c))
+                else:
+                    kept_clips.append(c)
+            data["gta_clips"] = kept_clips
+            kept_exports = []
+            for e in data.get("gta_exports") or []:
+                if e.get("job_id") == job_id:
+                    removed["exports"].append(dict(e))
+                else:
+                    kept_exports.append(e)
+            data["gta_exports"] = kept_exports
+
+        self.mutate(_del)
+        if delete_files:
+            from app.r2_compat import delete_media_url
+            urls = self._collect_media_urls(*removed["clips"], *removed["exports"])
+            for url in urls:
+                if delete_media_url(url):
+                    removed["deleted_files"] += 1
+        return {
+            "job_id": job_id,
+            "clips_deleted": len(removed["clips"]),
+            "exports_deleted": len(removed["exports"]),
+            "deleted_files": removed["deleted_files"],
+            "job": removed["job"],
+        }
+
+    def delete_gta_video(self, video_id: str, *, delete_files: bool = True) -> Optional[Dict[str, Any]]:
+        """Delete a source video and cascade jobs that used it."""
+        video = self.get_gta_video(video_id)
+        if not video:
+            return None
+        related_jobs = []
+        for j in self.list_gta_studio().get("jobs") or []:
+            payload = j.get("payload") or {}
+            if payload.get("video_id") == video_id:
+                related_jobs.append(j.get("id"))
+
+        cascade = []
+        for jid in related_jobs:
+            info = self.delete_gta_job(jid, delete_files=delete_files)
+            if info:
+                cascade.append(info)
+
+        def _del(data: Dict[str, Any]):
+            data["gta_videos"] = [v for v in (data.get("gta_videos") or []) if v.get("id") != video_id]
+
+        self.mutate(_del)
+        deleted_files = sum(int(c.get("deleted_files") or 0) for c in cascade)
+        if delete_files:
+            from app.r2_compat import delete_media_url
+            if delete_media_url(video.get("url") or ""):
+                deleted_files += 1
+        return {
+            "video_id": video_id,
+            "video": video,
+            "jobs_deleted": len(cascade),
+            "cascaded": cascade,
+            "deleted_files": deleted_files,
+        }
 
     def create_gta_segment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         tags = payload.get("tags") or []

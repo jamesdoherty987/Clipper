@@ -261,7 +261,7 @@ def list_exports():
 
 @app.post("/api/exports/{export_id}/approve")
 def approve_export(export_id: str):
-    export = get_store().update_gta_export(export_id, {"status": "approved"})
+    export = get_store().set_export_status(export_id, "approved")
     if not export:
         raise HTTPException(404, "Export not found")
     return {"success": True, "export": export}
@@ -269,7 +269,7 @@ def approve_export(export_id: str):
 
 @app.post("/api/exports/{export_id}/reject")
 def reject_export(export_id: str):
-    export = get_store().update_gta_export(export_id, {"status": "rejected"})
+    export = get_store().set_export_status(export_id, "rejected")
     if not export:
         raise HTTPException(404, "Export not found")
     return {"success": True, "export": export}
@@ -397,9 +397,53 @@ def list_clips():
     return {"success": True, "clips": get_store().list_gta_studio()["clips"]}
 
 
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str):
+    """Delete a full run: job + all clips/exports (+ media files)."""
+    info = get_store().delete_gta_job(job_id, delete_files=True)
+    if not info:
+        raise HTTPException(404, "Job not found")
+    return {"success": True, **info}
+
+
+@app.delete("/api/clips/{clip_id}")
+def delete_clip(clip_id: str):
+    info = get_store().delete_gta_clip(clip_id, delete_files=True)
+    if not info:
+        raise HTTPException(404, "Clip not found")
+    return {
+        "success": True,
+        "clip_id": clip_id,
+        "exports_deleted": len(info.get("exports") or []),
+        "deleted_files": info.get("deleted_files") or 0,
+    }
+
+
+@app.delete("/api/exports/{export_id}")
+def delete_export(export_id: str):
+    info = get_store().delete_gta_export(export_id, delete_files=True)
+    if not info:
+        raise HTTPException(404, "Export not found")
+    return {
+        "success": True,
+        "export_id": export_id,
+        "clip_deleted": bool(info.get("clip")),
+        "deleted_files": info.get("deleted_files") or 0,
+    }
+
+
+@app.delete("/api/videos/{video_id}")
+def delete_video(video_id: str):
+    """Delete a source video and cascade all jobs/clips that used it."""
+    info = get_store().delete_gta_video(video_id, delete_files=True)
+    if not info:
+        raise HTTPException(404, "Video not found")
+    return {"success": True, **info}
+
+
 @app.post("/api/clips/{clip_id}/approve")
 def approve_clip(clip_id: str):
-    clip = get_store().update_gta_clip(clip_id, {"status": "approved"})
+    clip = get_store().set_clip_status(clip_id, "approved")
     if not clip:
         raise HTTPException(404, "Clip not found")
     return {"success": True, "clip": clip}
@@ -407,7 +451,7 @@ def approve_clip(clip_id: str):
 
 @app.post("/api/clips/{clip_id}/reject")
 def reject_clip(clip_id: str):
-    clip = get_store().update_gta_clip(clip_id, {"status": "rejected"})
+    clip = get_store().set_clip_status(clip_id, "rejected")
     if not clip:
         raise HTTPException(404, "Clip not found")
     return {"success": True, "clip": clip}
@@ -439,9 +483,47 @@ def regenerate_clip_route(clip_id: str, body: dict):
     return {"success": True, "clip": clip}
 
 
+@app.get("/api/clips/style-presets")
+def clip_style_presets():
+    from app.studio.streamer_clips.clip_style import list_presets, normalize_clip_style
+    return {
+        "success": True,
+        "presets": list_presets(),
+        "defaults": normalize_clip_style({"preset": "viral"}),
+    }
+
+
+@app.post("/api/videos/from-url")
+def video_from_url(body: dict):
+    """Download a YouTube / direct media URL into local storage."""
+    from app.studio.streamer_clips.ingestion import ingest_source_url_as_video
+    store = get_store()
+    body = body or {}
+    source_url = (body.get("source_url") or body.get("url") or "").strip()
+    if not source_url:
+        raise HTTPException(400, "source_url is required")
+    try:
+        video = ingest_source_url_as_video(store, {
+            "source_url": source_url,
+            "name": body.get("name") or "",
+            "streamer_name": body.get("streamer_name") or "",
+            "source_id": body.get("source_id") or "",
+            "created_by": body.get("created_by") or "local",
+        })
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    return {"success": True, "video": video}
+
+
 @app.post("/api/clips/jobs")
 def create_clip_job(body: dict):
-    from app.studio.streamer_clips.ingestion import create_clip_job_payload, validate_clip_request
+    from app.studio.streamer_clips.ingestion import (
+        create_clip_job_payload,
+        ingest_source_url_as_video,
+        validate_clip_request,
+    )
     store = get_store()
     body = body or {}
     try:
@@ -449,6 +531,14 @@ def create_clip_job(body: dict):
     except ValueError as e:
         raise HTTPException(400, str(e))
     video_id = (body.get("video_id") or "").strip()
+    if not video_id and (body.get("source_url") or body.get("url") or "").strip():
+        try:
+            video = ingest_source_url_as_video(store, body)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(400, str(e))
+        video_id = video["id"]
     if not video_id and body.get("video_url"):
         video = store.create_gta_video({
             "name": body.get("name") or f"{body.get('streamer_name') or 'Streamer'} source",
@@ -466,12 +556,22 @@ def create_clip_job(body: dict):
             store.assert_gta_source_commercial_ok(body["source_id"])
         except ValueError as e:
             raise HTTPException(400, str(e))
+    style_keys = (
+        "preset", "burn_captions", "add_intro", "add_end_card", "show_logo", "apply_zoom",
+        "caption_style", "caption_position", "caption_size", "highlight_keywords",
+        "logo_position", "logo_size", "zoom_amount", "split_ratio", "cam_anchor",
+        "intro_duration_sec", "intro_text", "end_card_text", "use_music", "music_volume",
+        "style",
+    )
+    style_overrides = {k: body[k] for k in style_keys if k in body}
     payload = create_clip_job_payload(
         video_id=video_id,
         streamer_name=(body.get("streamer_name") or "").strip(),
         clip_count=int(body.get("clip_count") or 8),
         target_duration_sec=int(body.get("target_duration_sec") or 30),
-        template=(body.get("template") or "facecam_top").strip(),
+        template=(body.get("template") or "fullscreen_gameplay").strip(),
+        video_context=(body.get("video_context") or body.get("context") or "").strip(),
+        **style_overrides,
     )
     job = store.create_gta_job({
         "name": f"{payload.get('streamer_name') or 'Streamer'} clips",
@@ -481,3 +581,92 @@ def create_clip_job(body: dict):
     })
     job = enqueue_job(store, "clip_job", job["id"]) or job
     return {"success": True, "job": job, "video_id": video_id}
+
+
+@app.post("/api/clips/jobs/{job_id}/rerun")
+def rerun_clip_job(job_id: str, body: dict = None):
+    """Re-queue a streamer clip job using the same source video + style settings."""
+    from app.studio.streamer_clips.ingestion import create_clip_job_payload
+
+    store = get_store()
+    body = body or {}
+    original = store.get_gta_job(job_id)
+    if not original:
+        raise HTTPException(404, "Job not found")
+    if (original.get("type") or "") != "clip_job":
+        raise HTTPException(400, "Only streamer clip jobs can be rerun")
+
+    prev = dict(original.get("payload") or {})
+    video_id = (prev.get("video_id") or "").strip()
+    if not video_id:
+        raise HTTPException(400, "This run has no saved source video to reuse")
+    video = store.get_gta_video(video_id)
+    if not video or not video.get("url"):
+        raise HTTPException(400, "Source video is missing — re-import the URL or upload again")
+
+    style = prev.get("style") if isinstance(prev.get("style"), dict) else {}
+    style_keys = (
+        "preset", "burn_captions", "add_intro", "add_end_card", "show_logo", "apply_zoom",
+        "caption_style", "caption_position", "caption_size", "highlight_keywords",
+        "logo_position", "logo_size", "zoom_amount", "split_ratio", "cam_anchor",
+        "intro_duration_sec", "intro_text", "end_card_text", "use_music", "music_volume",
+    )
+    style_overrides = {k: style[k] for k in style_keys if k in style}
+    style_overrides.update({k: prev[k] for k in style_keys if k in prev})
+    for k in style_keys:
+        if k in body:
+            style_overrides[k] = body[k]
+    if style:
+        style_overrides["style"] = {**style, **{k: style_overrides[k] for k in style_keys if k in style_overrides}}
+
+    clip_count = int(body.get("clip_count") if body.get("clip_count") is not None else (prev.get("clip_count") or 8))
+    target_duration = int(
+        body.get("target_duration_sec")
+        if body.get("target_duration_sec") is not None
+        else (prev.get("target_duration_sec") or 30)
+    )
+    streamer_name = (
+        body.get("streamer_name")
+        if body.get("streamer_name") is not None
+        else (prev.get("streamer_name") or video.get("streamer_name") or "")
+    ).strip()
+    video_context = (
+        body.get("video_context")
+        if body.get("video_context") is not None
+        else (prev.get("video_context") or "")
+    )
+    if isinstance(video_context, str):
+        video_context = video_context.strip()
+    else:
+        video_context = ""
+
+    payload = create_clip_job_payload(
+        video_id=video_id,
+        streamer_name=streamer_name,
+        clip_count=clip_count,
+        target_duration_sec=target_duration,
+        template=(
+            body.get("template")
+            or prev.get("template")
+            or style.get("template")
+            or "fullscreen_gameplay"
+        ).strip(),
+        video_context=video_context,
+        **style_overrides,
+    )
+    payload["source_id"] = (
+        (body.get("source_id") or prev.get("source_id") or video.get("source_id") or "")
+    ).strip()
+    payload["rerun_of"] = job_id
+
+    base_name = (original.get("name") or f"{streamer_name or 'Streamer'} clips").strip()
+    name = base_name if "(rerun)" in base_name.lower() else f"{base_name} (rerun)"
+
+    job = store.create_gta_job({
+        "name": name,
+        "type": "clip_job",
+        "created_by": (body.get("created_by") or original.get("created_by") or "local").strip(),
+        "payload": payload,
+    })
+    job = enqueue_job(store, "clip_job", job["id"]) or job
+    return {"success": True, "job": job, "video_id": video_id, "rerun_of": job_id}

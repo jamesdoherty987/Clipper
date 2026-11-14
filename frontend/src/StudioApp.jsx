@@ -2,13 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AdminEmptyState from './EmptyState';
 import './styles.css';
 
+function formatApiError(data, status, fallback) {
+  const detail = data?.detail ?? data?.error;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item?.msg || item?.message || String(item)).join('; ');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  return fallback || `Request failed (${status})`;
+}
+
 async function apiFetch(path, options = {}) {
   const res = await fetch(path, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new Error(formatApiError(data, res.status));
   return data;
 }
 
@@ -20,11 +32,9 @@ async function apiUpload(path, file, fields = {}) {
   });
   const res = await fetch(path, { method: 'POST', body: form });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || data.error || `Upload failed (${res.status})`);
+  if (!res.ok) throw new Error(formatApiError(data, res.status, `Upload failed (${res.status})`));
   return data;
 }
-
-function AdminTabHelp() { return null; }
 
 
 const NAV = [
@@ -32,15 +42,105 @@ const NAV = [
   { id: 'explainers', label: 'Explainers', short: 'Explain', icon: 'fa-microphone' },
   { id: 'clips', label: 'Streamer clips', short: 'Clips', icon: 'fa-cut' },
   { id: 'library', label: 'Gameplay library', short: 'Library', icon: 'fa-folder-open' },
-  { id: 'review', label: 'Review', short: 'Review', icon: 'fa-check-double' },
+  { id: 'review', label: 'Review & manage', short: 'Manage', icon: 'fa-check-double' },
   { id: 'settings', label: 'Settings', short: 'Setup', icon: 'fa-cog' },
 ];
 
-const TEMPLATES = [
-  { id: 'facecam_top', label: 'Facecam + gameplay' },
-  { id: 'fullscreen_gameplay', label: 'Full-screen gameplay' },
+const EXPLAINER_TEMPLATES = [
+  { id: 'facecam_top', label: 'Facecam top + gameplay bottom' },
+  { id: 'fullscreen_gameplay', label: 'Full-screen gameplay + cam pip' },
   { id: 'pip', label: 'Picture-in-picture' },
 ];
+
+const CLIP_TEMPLATES = [
+  { id: 'fullscreen_gameplay', label: 'Full-screen vertical' },
+  { id: 'reaction_stack', label: 'Split: reaction top + gameplay bottom' },
+  { id: 'pip', label: 'Punch-in vertical' },
+];
+
+const CLIP_PRESETS = [
+  { id: 'viral', label: 'Viral', blurb: 'Big center captions, intro card, light zoom' },
+  { id: 'clean', label: 'Clean', blurb: 'Bottom captions, no intro, subtle look' },
+  { id: 'split_reaction', label: 'Reaction', blurb: 'Face/gameplay split + end card' },
+  { id: 'branded', label: 'Branded', blurb: 'Intro + end card + logo package' },
+  { id: 'custom', label: 'Custom', blurb: 'Your own mix of options below' },
+];
+
+const CLIP_STYLE_TABS = [
+  { id: 'layout', label: 'Layout', icon: 'fa-th-large' },
+  { id: 'captions', label: 'Captions', icon: 'fa-closed-captioning' },
+  { id: 'cards', label: 'Intro / end', icon: 'fa-clone' },
+  { id: 'overlays', label: 'Overlays', icon: 'fa-layer-group' },
+];
+
+const PRESET_DEFAULTS = {
+  viral: {
+    template: 'fullscreen_gameplay', burn_captions: true, caption_style: 'viral',
+    caption_position: 'center', caption_size: 'lg', highlight_keywords: true,
+    add_intro: true, add_end_card: false, show_logo: true, logo_position: 'top_right',
+    logo_size: 150, apply_zoom: true, zoom_amount: 1.14, split_ratio: 0.42,
+    cam_anchor: 'top_right', intro_duration_sec: 1.5, intro_text: '', end_card_text: '',
+    use_music: true,
+  },
+  clean: {
+    template: 'fullscreen_gameplay', burn_captions: true, caption_style: 'clean',
+    caption_position: 'bottom', caption_size: 'md', highlight_keywords: false,
+    add_intro: false, add_end_card: false, show_logo: true, logo_position: 'top_right',
+    logo_size: 140, apply_zoom: false, zoom_amount: 1.08, split_ratio: 0.42,
+    cam_anchor: 'top_right', intro_duration_sec: 1.4, intro_text: '', end_card_text: '',
+    use_music: true,
+  },
+  split_reaction: {
+    template: 'reaction_stack', burn_captions: true, caption_style: 'bold',
+    caption_position: 'bottom', caption_size: 'md', highlight_keywords: true,
+    add_intro: false, add_end_card: true, show_logo: true, logo_position: 'top_left',
+    logo_size: 130, apply_zoom: false, zoom_amount: 1.1, split_ratio: 0.42,
+    cam_anchor: 'top_right', intro_duration_sec: 1.4, intro_text: '', end_card_text: 'Follow for more',
+    use_music: true,
+  },
+  branded: {
+    template: 'fullscreen_gameplay', burn_captions: true, caption_style: 'viral',
+    caption_position: 'bottom', caption_size: 'md', highlight_keywords: true,
+    add_intro: true, add_end_card: true, show_logo: true, logo_position: 'top_right',
+    logo_size: 170, apply_zoom: true, zoom_amount: 1.1, split_ratio: 0.4,
+    cam_anchor: 'top_right', intro_duration_sec: 1.8, intro_text: '', end_card_text: 'Follow for more',
+    use_music: true,
+  },
+};
+
+const TEMPLATES = EXPLAINER_TEMPLATES;
+
+function clipJobBody(clipForm, actor, extra = {}) {
+  return {
+    streamer_name: clipForm.streamer_name,
+    video_context: clipForm.video_context,
+    clip_count: clipForm.clip_count,
+    target_duration_sec: clipForm.target_duration_sec,
+    template: clipForm.template,
+    source_id: clipForm.source_id,
+    preset: clipForm.preset,
+    burn_captions: clipForm.burn_captions,
+    caption_style: clipForm.caption_style,
+    caption_position: clipForm.caption_position,
+    caption_size: clipForm.caption_size,
+    highlight_keywords: clipForm.highlight_keywords,
+    add_intro: clipForm.add_intro,
+    add_end_card: clipForm.add_end_card,
+    show_logo: clipForm.show_logo,
+    logo_position: clipForm.logo_position,
+    logo_size: clipForm.logo_size,
+    apply_zoom: clipForm.apply_zoom,
+    zoom_amount: clipForm.zoom_amount,
+    split_ratio: clipForm.split_ratio,
+    cam_anchor: clipForm.cam_anchor,
+    intro_duration_sec: clipForm.intro_duration_sec,
+    intro_text: clipForm.intro_text,
+    end_card_text: clipForm.end_card_text,
+    use_music: clipForm.use_music,
+    created_by: actor,
+    ...extra,
+  };
+}
 
 function statusBadge(status) {
   const s = String(status || '').toLowerCase();
@@ -84,6 +184,28 @@ function JobProgress({ job }) {
   );
 }
 
+function ReviewVideo({ src }) {
+  const onPlay = (e) => {
+    const current = e.currentTarget;
+    document.querySelectorAll('.gta-review-card video').forEach((el) => {
+      if (el !== current) {
+        try { el.pause(); } catch (_) { /* ignore */ }
+      }
+    });
+  };
+  return (
+    <div className="gta-video-frame">
+      <video
+        src={src}
+        controls
+        playsInline
+        preload="none"
+        onPlay={onPlay}
+      />
+    </div>
+  );
+}
+
 export default function GTAClipperApp({
   showToast: showToastProp,
 } = {}) {
@@ -92,12 +214,12 @@ export default function GTAClipperApp({
   const [overview, setOverview] = useState(null);
   const [studio, setStudio] = useState(null);
   const [busy, setBusy] = useState('');
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState(null);
   const pollRef = useRef(null);
   const actor = 'local';
-  const showToast = showToastProp || ((msg) => {
-    setToast(String(msg || ''));
-    window.setTimeout(() => setToast(''), 3200);
+  const showToast = showToastProp || ((msg, type = 'success') => {
+    setToast({ message: String(msg || ''), type: type === 'error' ? 'error' : 'success' });
+    window.setTimeout(() => setToast(null), 4200);
   });
 
   const loadAll = useCallback(async () => {
@@ -173,12 +295,31 @@ export default function GTAClipperApp({
   /* Clips */
   const [clipForm, setClipForm] = useState({
     streamer_name: '',
+    video_context: '',
     clip_count: 8,
     target_duration_sec: 30,
-    template: 'fullscreen_gameplay',
     source_id: '',
     source_url: '',
+    preset: 'viral',
+    ...PRESET_DEFAULTS.viral,
   });
+  const [styleOpen, setStyleOpen] = useState(true);
+  const [styleTab, setStyleTab] = useState('overlays');
+  const [focusJobId, setFocusJobId] = useState('');
+  const [showAllReviews, setShowAllReviews] = useState(false);
+
+  const applyClipPreset = (presetId) => {
+    const base = PRESET_DEFAULTS[presetId];
+    if (!base) {
+      setClipForm((prev) => ({ ...prev, preset: 'custom' }));
+      return;
+    }
+    setClipForm((prev) => ({ ...prev, preset: presetId, ...base }));
+  };
+
+  const patchClipStyle = (patch) => {
+    setClipForm((prev) => ({ ...prev, ...patch, preset: 'custom' }));
+  };
   const [regenDraft, setRegenDraft] = useState({});
 
   /* Library */
@@ -213,6 +354,79 @@ export default function GTAClipperApp({
 
   const pendingExports = (studio?.exports || []).filter((e) => e.status === 'needs_review');
   const pendingClips = (studio?.clips || []).filter((c) => c.status === 'pending');
+  const clipJobs = useMemo(
+    () => (studio?.jobs || []).filter((j) => j.type === 'clip_job' || j.type === 'explainer_render'),
+    [studio?.jobs],
+  );
+  const latestClipJobId = useMemo(() => {
+    return focusJobId || clipJobs[0]?.id || '';
+  }, [clipJobs, focusJobId]);
+  const focusedJob = useMemo(
+    () => clipJobs.find((j) => j.id === latestClipJobId) || null,
+    [clipJobs, latestClipJobId],
+  );
+  const reviewExports = useMemo(() => {
+    const all = studio?.exports || [];
+    if (showAllReviews || !latestClipJobId) return all;
+    return all.filter((e) => e.job_id === latestClipJobId);
+  }, [studio?.exports, latestClipJobId, showAllReviews]);
+  const focusedJobClipCount = useMemo(
+    () => (studio?.clips || []).filter((c) => c.job_id === latestClipJobId).length,
+    [studio?.clips, latestClipJobId],
+  );
+
+  const confirmDelete = (message) => window.confirm(message);
+
+  const deleteRun = (jobId) => {
+    if (!jobId) return;
+    if (!confirmDelete('Delete this entire run? All clips and exports from it will be removed.')) return;
+    run(`deljob-${jobId}`, async () => {
+      await apiFetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      if (focusJobId === jobId) setFocusJobId('');
+      showToast?.('Run deleted', 'success');
+    });
+  };
+
+  const rerunClipJob = (job) => {
+    if (!job?.id) return;
+    if (job.type && job.type !== 'clip_job') {
+      showToast?.('Only streamer clip runs can be rerun', 'error');
+      return;
+    }
+    const videoId = job.payload?.video_id;
+    if (!videoId) {
+      showToast?.('This run has no saved source video to reuse', 'error');
+      return;
+    }
+    run(`rerun-${job.id}`, async () => {
+      const data = await apiFetch(`/api/clips/jobs/${job.id}/rerun`, {
+        method: 'POST',
+        body: JSON.stringify({ created_by: actor }),
+      });
+      setFocusJobId(data.job?.id || '');
+      setShowAllReviews(false);
+      showToast?.('Rerun started with the same video', 'success');
+      setNav('review');
+    });
+  };
+
+  const deleteExportCard = (exp) => {
+    const id = exp.clip_id || exp.id;
+    const path = exp.clip_id ? `/api/clips/${exp.clip_id}` : `/api/exports/${exp.id}`;
+    if (!confirmDelete('Delete this clip from the run?')) return;
+    run(`delclip-${id}`, async () => {
+      await apiFetch(path, { method: 'DELETE' });
+      showToast?.('Clip deleted', 'success');
+    });
+  };
+
+  const deleteSourceVideo = (videoId, name) => {
+    if (!confirmDelete(`Delete source video “${name || 'video'}” and all runs that used it?`)) return;
+    run(`delvid-${videoId}`, async () => {
+      await apiFetch(`/api/videos/${videoId}`, { method: 'DELETE' });
+      showToast?.('Source video deleted', 'success');
+    });
+  };
 
   if (loading && !studio) {
     return (
@@ -224,19 +438,16 @@ export default function GTAClipperApp({
 
   return (
     <div className="ap-view gta-studio">
-      {toast ? <div className="gta-toast">{toast}</div> : null}
+      {toast ? (
+        <div className={`gta-toast${toast.type === 'error' ? ' error' : ''}`} role="status">
+          {toast.message}
+        </div>
+      ) : null}
       <div className="gta-header ap-view-header">
         <div className="ap-view-header-leading">
           <h1><i className="fas fa-video" /> GTAClipper</h1>
-          <AdminTabHelp label="How it works" panelTitle="GTAClipper">
-            <p>
-              Pipeline B builds explainers from a script + facecam + your gameplay library.
-              Pipeline A turns long streamer VODs into ranked short clips with captions.
-              Everything renders 9:16 and lands in Review before publish.
-            </p>
-          </AdminTabHelp>
           <p className="gta-header-copy">
-            Daily content desk — research topics, cut streamer moments, index gameplay, ship vertical videos.
+            Turn long videos into vertical shorts, or build explainers from a script + facecam. Review everything before you ship.
           </p>
         </div>
         <button type="button" className="ap-btn secondary" onClick={() => refresh()} disabled={!!busy}>
@@ -273,6 +484,14 @@ export default function GTAClipperApp({
         )}
       </div>
 
+      {(!providers?.ffmpeg?.configured || !providers?.openai?.configured) && (
+        <div className="gta-banner warn">
+          {!providers?.ffmpeg?.configured
+            ? 'Install FFmpeg on this Mac before rendering videos.'
+            : 'Add OPENAI_API_KEY to your .env file, then restart the API.'}
+        </div>
+      )}
+
       {nav === 'dashboard' && (
         <>
           <div className="gta-stats">
@@ -291,17 +510,15 @@ export default function GTAClipperApp({
           </div>
 
           <div className="gta-panel">
-            <h2>Create new content</h2>
+            <h2>Start here</h2>
             <div className="gta-pipeline-grid">
               <button type="button" className="gta-pipeline-card" onClick={() => setNav('clips')}>
                 <h3><i className="fas fa-cut" /> Streamer clips</h3>
-                <p>Upload a long VOD. AI finds highlights, scores them, and renders vertical shorts with captions.</p>
-                <span className="gta-pipe-tag">Pipeline A</span>
+                <p>Paste a URL → pick captions/logo/music → generate viral Shorts, then approve in Review.</p>
               </button>
               <button type="button" className="gta-pipeline-card" onClick={() => setNav('explainers')}>
-                <h3><i className="fas fa-microphone" /> GTA explainer</h3>
-                <p>Generate a short script, record facecam, auto-match gameplay, render a finished 9:16 video.</p>
-                <span className="gta-pipe-tag">Pipeline B</span>
+                <h3><i className="fas fa-microphone" /> Explainers</h3>
+                <p>Generate a script, upload facecam, match gameplay, and render a finished 9:16 video.</p>
               </button>
             </div>
           </div>
@@ -533,10 +750,13 @@ export default function GTAClipperApp({
           <div className="gta-panel">
             <h2>Facecam & render</h2>
             <p className="gta-note">
-              Upload MP4/MOV of you reading the script. We transcribe, align sections, match gameplay, and burn keyword captions.
+              Generate a script first, then upload an MP4/MOV of you reading it. We match gameplay and burn captions.
             </p>
+            {!selectedScriptId && (
+              <p className="gta-note">Select or generate a script on the left before uploading facecam.</p>
+            )}
             <div className="gta-actions">
-              <label className={`ap-btn secondary gta-upload-btn${!selectedScriptId ? '' : ''}`}>
+              <label className="ap-btn secondary gta-upload-btn">
                 {busy === 'recording' ? 'Uploading…' : 'Upload facecam'}
                 <input
                   type="file"
@@ -630,241 +850,609 @@ export default function GTAClipperApp({
       )}
 
       {nav === 'clips' && (
-        <div className="gta-panel">
+        <div className="gta-panel gta-clips-panel">
           <div className="gta-panel-head">
             <div>
-              <h2>Streamer clipping</h2>
-              <p className="gta-note" style={{ marginTop: 4 }}>
-                Upload a permitted MP4/MOV. We transcribe, find audio spikes & scene cuts, score moments with vision + GPT, then render vertical clips.
+              <h2>Streamer clips</h2>
+              <p className="gta-note gta-panel-lead">
+                Turn a VOD into vertical Shorts. We find the viral moments, burn your style on, then you approve in Review.
               </p>
             </div>
+            {pendingClips.length > 0 && (
+              <button type="button" className="ap-btn primary" onClick={() => setNav('review')}>
+                Review {pendingClips.length} clip{pendingClips.length === 1 ? '' : 's'}
+              </button>
+            )}
           </div>
 
-          <div className="gta-form-grid">
-            <div className="gta-field">
-              <label>Streamer name</label>
-              <input
-                value={clipForm.streamer_name}
-                onChange={(e) => setClipForm({ ...clipForm, streamer_name: e.target.value })}
-                placeholder="Creator name"
-              />
-            </div>
-            <div className="gta-field">
-              <label>Rights source</label>
-              <select
-                value={clipForm.source_id}
-                onChange={(e) => setClipForm({ ...clipForm, source_id: e.target.value })}
-              >
-                <option value="">None</option>
-                {(studio?.sources || []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.permission_status}{s.commercial_use ? ', commercial' : ''})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="gta-field">
-              <label>How many clips</label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={clipForm.clip_count}
-                onChange={(e) => setClipForm({ ...clipForm, clip_count: Number(e.target.value) || 8 })}
-              />
-            </div>
-            <div className="gta-field">
-              <label>Target duration (sec)</label>
-              <input
-                type="number"
-                min={12}
-                max={75}
-                value={clipForm.target_duration_sec}
-                onChange={(e) => setClipForm({ ...clipForm, target_duration_sec: Number(e.target.value) || 30 })}
-              />
-            </div>
-            <div className="gta-field">
-              <label>Template</label>
-              <select
-                value={clipForm.template}
-                onChange={(e) => setClipForm({ ...clipForm, template: e.target.value })}
-              >
-                {TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-              </select>
-            </div>
-            <div className="gta-field">
-              <label>URL (blocked)</label>
-              <input
-                value={clipForm.source_url}
-                onChange={(e) => setClipForm({ ...clipForm, source_url: e.target.value })}
-                placeholder="Don’t paste scraped URLs — upload a file you have rights to"
-              />
-            </div>
-          </div>
+          <ol className="gta-howto">
+            <li>
+              <span className="gta-howto-num">1</span>
+              <div>
+                <strong>Add source</strong>
+                <p>Paste a YouTube link or upload an MP4/MOV you have rights to.</p>
+              </div>
+            </li>
+            <li>
+              <span className="gta-howto-num">2</span>
+              <div>
+                <strong>Pick style & overlays</strong>
+                <p>Captions, logo, intro/end cards, and music are all optional toggles below.</p>
+              </div>
+            </li>
+            <li>
+              <span className="gta-howto-num">3</span>
+              <div>
+                <strong>Generate → Review</strong>
+                <p>We cut the best moments. Open Review to watch, keep, or delete each clip.</p>
+              </div>
+            </li>
+          </ol>
 
-          <div className="gta-actions">
-            <label className="ap-btn primary gta-upload-btn">
-              {busy === 'clipupload' ? 'Uploading & queuing…' : 'Upload MP4 and generate clips'}
-              <input
-                type="file"
-                accept="video/mp4,video/quicktime,video/*"
-                hidden
-                disabled={!!busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  if (!file) return;
-                  run('clipupload', async () => {
-                    if (clipForm.source_url.trim()) {
-                      throw new Error('URL ingestion is not available. Upload an MP4/MOV you have permission to use.');
-                    }
-                    const uploaded = await apiUpload(
-                      '/api/videos/upload',
-                      file,
-                      {
-                        kind: 'streamer',
-                        name: file.name,
-                        streamer_name: clipForm.streamer_name,
-                        source_id: clipForm.source_id,
-                        created_by: actor,
-                      },
-                    );
-                    await apiFetch('/api/clips/jobs', {
+          <section className="gta-clip-step">
+            <div className="gta-clip-step-head">
+              <h3><span>1</span> Source video</h3>
+            </div>
+            <div className="gta-form-grid">
+              <div className="gta-field full">
+                <label>YouTube / media URL</label>
+                <input
+                  value={clipForm.source_url}
+                  onChange={(e) => setClipForm({ ...clipForm, source_url: e.target.value })}
+                  placeholder="https://www.youtube.com/watch?v=…"
+                />
+              </div>
+              <div className="gta-field full">
+                <label>What is this video? (context for AI)</label>
+                <textarea
+                  value={clipForm.video_context}
+                  onChange={(e) => setClipForm({ ...clipForm, video_context: e.target.value })}
+                  placeholder="e.g. UFC fight highlight — find the finish / knockout. Or: GTA RP stream, funny fails and police chases."
+                  rows={2}
+                />
+                <p className="gta-field-hint">
+                  Tell the AI what matters in this video. It uses this with the full transcript + audio spikes to find the real climax — not hardcoded events.
+                </p>
+              </div>
+              <div className="gta-field">
+                <label>Streamer / creator name</label>
+                <input
+                  value={clipForm.streamer_name}
+                  onChange={(e) => setClipForm({ ...clipForm, streamer_name: e.target.value })}
+                  placeholder="Optional — used in titles"
+                />
+              </div>
+              <div className="gta-field">
+                <label>Rights source</label>
+                <select
+                  value={clipForm.source_id}
+                  onChange={(e) => setClipForm({ ...clipForm, source_id: e.target.value })}
+                >
+                  <option value="">None</option>
+                  {(studio?.sources || []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.permission_status}{s.commercial_use ? ', commercial' : ''})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="gta-field">
+                <label>How many clips to cut</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={clipForm.clip_count}
+                  onChange={(e) => setClipForm({ ...clipForm, clip_count: Number(e.target.value) || 8 })}
+                />
+                <p className="gta-field-hint">Raise this for more clips from the same VOD (max 20).</p>
+              </div>
+              <div className="gta-field">
+                <label>Target length (seconds)</label>
+                <input
+                  type="number"
+                  min={8}
+                  max={120}
+                  value={clipForm.target_duration_sec}
+                  onChange={(e) => setClipForm({ ...clipForm, target_duration_sec: Number(e.target.value) || 30 })}
+                />
+                <p className="gta-field-hint">15s target → clips between 10s and 28s. Same ratio for other targets.</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="gta-clip-step gta-style-studio">
+            <div className="gta-clip-step-head gta-style-studio-head">
+              <div>
+                <h3><span>2</span> Style, captions & overlays</h3>
+                <p className="gta-note">
+                  Start with a preset. Then open a tab to turn overlays on/off and tweak them.
+                </p>
+              </div>
+              <button type="button" className="ap-btn secondary" onClick={() => setStyleOpen((v) => !v)}>
+                {styleOpen ? 'Hide options' : 'Show options'}
+              </button>
+            </div>
+
+            <div className="gta-preset-grid">
+              {CLIP_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`gta-preset-card${clipForm.preset === p.id ? ' active' : ''}`}
+                  onClick={() => applyClipPreset(p.id)}
+                >
+                  <strong>{p.label}</strong>
+                  <span>{p.blurb}</span>
+                </button>
+              ))}
+            </div>
+
+            {styleOpen && (
+              <>
+                <div className="gta-style-tabs" role="tablist" aria-label="Style options">
+                  {CLIP_STYLE_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={styleTab === tab.id}
+                      className={`gta-style-tab${styleTab === tab.id ? ' active' : ''}`}
+                      onClick={() => setStyleTab(tab.id)}
+                    >
+                      <i className={`fas ${tab.icon}`} aria-hidden="true" />
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="gta-style-body">
+                  <div className="gta-style-controls">
+                    {styleTab === 'layout' && (
+                      <section className="gta-style-section">
+                        <p className="gta-tip">
+                          <i className="fas fa-info-circle" aria-hidden="true" />
+                          Layout is how the video is framed on a 9:16 phone screen — not overlays.
+                        </p>
+                        <div className="gta-form-grid">
+                          <div className="gta-field full">
+                            <label>Composition</label>
+                            <select
+                              value={clipForm.template}
+                              onChange={(e) => patchClipStyle({ template: e.target.value })}
+                            >
+                              {CLIP_TEMPLATES.map((t) => (
+                                <option key={t.id} value={t.id}>{t.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {clipForm.template === 'reaction_stack' && (
+                            <>
+                              <div className="gta-field">
+                                <label>Reaction pane ({Math.round(clipForm.split_ratio * 100)}%)</label>
+                                <input
+                                  type="range"
+                                  min={0.28}
+                                  max={0.55}
+                                  step={0.01}
+                                  value={clipForm.split_ratio}
+                                  onChange={(e) => patchClipStyle({ split_ratio: Number(e.target.value) })}
+                                />
+                              </div>
+                              <div className="gta-field">
+                                <label>Cam crop anchor</label>
+                                <select
+                                  value={clipForm.cam_anchor}
+                                  onChange={(e) => patchClipStyle({ cam_anchor: e.target.value })}
+                                >
+                                  <option value="top_right">Top right</option>
+                                  <option value="top_left">Top left</option>
+                                  <option value="top_center">Top center</option>
+                                  <option value="center">Center</option>
+                                </select>
+                              </div>
+                            </>
+                          )}
+                          {(clipForm.template === 'fullscreen_gameplay' || clipForm.template === 'pip') && (
+                            <>
+                              <div className="gta-field">
+                                <label className="gta-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!clipForm.apply_zoom}
+                                    onChange={(e) => patchClipStyle({ apply_zoom: e.target.checked })}
+                                  />
+                                  Punch-in zoom
+                                </label>
+                              </div>
+                              <div className="gta-field">
+                                <label>Zoom strength ({Number(clipForm.zoom_amount || 1).toFixed(2)}×)</label>
+                                <input
+                                  type="range"
+                                  min={1}
+                                  max={1.35}
+                                  step={0.01}
+                                  value={clipForm.zoom_amount}
+                                  disabled={!clipForm.apply_zoom}
+                                  onChange={(e) => patchClipStyle({ zoom_amount: Number(e.target.value) })}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </section>
+                    )}
+
+                    {styleTab === 'captions' && (
+                      <section className="gta-style-section">
+                        <p className="gta-tip">
+                          <i className="fas fa-info-circle" aria-hidden="true" />
+                          Captions are burned from the transcript automatically — you don’t type them. Toggle style here.
+                        </p>
+                        <div className="gta-form-grid">
+                          <div className="gta-field full">
+                            <label className="gta-check">
+                              <input
+                                type="checkbox"
+                                checked={!!clipForm.burn_captions}
+                                onChange={(e) => patchClipStyle({ burn_captions: e.target.checked })}
+                              />
+                              Burn captions into each clip
+                            </label>
+                          </div>
+                          <div className="gta-field">
+                            <label>Style</label>
+                            <select
+                              value={clipForm.caption_style}
+                              disabled={!clipForm.burn_captions}
+                              onChange={(e) => patchClipStyle({ caption_style: e.target.value })}
+                            >
+                              <option value="viral">Viral / punchy</option>
+                              <option value="bold">Bold outline</option>
+                              <option value="clean">Clean</option>
+                            </select>
+                          </div>
+                          <div className="gta-field">
+                            <label>Position</label>
+                            <select
+                              value={clipForm.caption_position}
+                              disabled={!clipForm.burn_captions}
+                              onChange={(e) => patchClipStyle({ caption_position: e.target.value })}
+                            >
+                              <option value="top">Top</option>
+                              <option value="center">Center</option>
+                              <option value="bottom">Bottom</option>
+                            </select>
+                          </div>
+                          <div className="gta-field">
+                            <label>Size</label>
+                            <select
+                              value={clipForm.caption_size}
+                              disabled={!clipForm.burn_captions}
+                              onChange={(e) => patchClipStyle({ caption_size: e.target.value })}
+                            >
+                              <option value="sm">Small</option>
+                              <option value="md">Medium</option>
+                              <option value="lg">Large</option>
+                            </select>
+                          </div>
+                          <div className="gta-field">
+                            <label className="gta-check">
+                              <input
+                                type="checkbox"
+                                checked={!!clipForm.highlight_keywords}
+                                disabled={!clipForm.burn_captions}
+                                onChange={(e) => patchClipStyle({ highlight_keywords: e.target.checked })}
+                              />
+                              Highlight keywords
+                            </label>
+                          </div>
+                        </div>
+                      </section>
+                    )}
+
+                    {styleTab === 'cards' && (
+                      <section className="gta-style-section">
+                        <p className="gta-tip">
+                          <i className="fas fa-info-circle" aria-hidden="true" />
+                          These are short title cards added before/after the clip — not separate videos.
+                        </p>
+                        <div className="gta-toggle-grid">
+                          <label className={`gta-toggle-card${clipForm.add_intro ? ' on' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={!!clipForm.add_intro}
+                              onChange={(e) => patchClipStyle({ add_intro: e.target.checked })}
+                            />
+                            <strong>Intro card</strong>
+                            <span>Title flash at the start</span>
+                          </label>
+                          <label className={`gta-toggle-card${clipForm.add_end_card ? ' on' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={!!clipForm.add_end_card}
+                              onChange={(e) => patchClipStyle({ add_end_card: e.target.checked })}
+                            />
+                            <strong>End card</strong>
+                            <span>“Follow for more” style closer</span>
+                          </label>
+                        </div>
+                        <div className="gta-form-grid" style={{ marginTop: '0.75rem' }}>
+                          <div className="gta-field">
+                            <label>Intro length ({Number(clipForm.intro_duration_sec || 1.5).toFixed(1)}s)</label>
+                            <input
+                              type="range"
+                              min={0.8}
+                              max={3.5}
+                              step={0.1}
+                              value={clipForm.intro_duration_sec}
+                              disabled={!clipForm.add_intro}
+                              onChange={(e) => patchClipStyle({ intro_duration_sec: Number(e.target.value) })}
+                            />
+                          </div>
+                          <div className="gta-field">
+                            <label>Custom intro text</label>
+                            <input
+                              value={clipForm.intro_text}
+                              disabled={!clipForm.add_intro}
+                              placeholder="Blank = use each clip’s title"
+                              onChange={(e) => patchClipStyle({ intro_text: e.target.value })}
+                            />
+                          </div>
+                          <div className="gta-field full">
+                            <label>End card text</label>
+                            <input
+                              value={clipForm.end_card_text}
+                              disabled={!clipForm.add_end_card}
+                              placeholder="Follow for more"
+                              onChange={(e) => patchClipStyle({ end_card_text: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                      </section>
+                    )}
+
+                    {styleTab === 'overlays' && (
+                      <section className="gta-style-section">
+                        <p className="gta-tip">
+                          <i className="fas fa-info-circle" aria-hidden="true" />
+                          Overlays = logo watermark + background music. Upload those assets once in Settings, then turn them on here for every job.
+                        </p>
+                        <div className="gta-asset-status">
+                          <div className={`gta-asset-pill${studio?.settings?.logo_url ? ' ready' : ' missing'}`}>
+                            <i className="fas fa-image" aria-hidden="true" />
+                            Logo {studio?.settings?.logo_url ? 'ready' : 'not set'}
+                          </div>
+                          <div className={`gta-asset-pill${studio?.settings?.music_url ? ' ready' : ' missing'}`}>
+                            <i className="fas fa-music" aria-hidden="true" />
+                            Music {studio?.settings?.music_url ? 'ready' : 'not set'}
+                          </div>
+                          <button type="button" className="ap-btn secondary" onClick={() => setNav('settings')}>
+                            Open Settings
+                          </button>
+                        </div>
+                        <div className="gta-toggle-grid">
+                          <label className={`gta-toggle-card${clipForm.show_logo ? ' on' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={!!clipForm.show_logo}
+                              onChange={(e) => patchClipStyle({ show_logo: e.target.checked })}
+                            />
+                            <strong>Logo watermark</strong>
+                            <span>Uses the Logo URL from Settings</span>
+                          </label>
+                          <label className={`gta-toggle-card${clipForm.use_music ? ' on' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={!!clipForm.use_music}
+                              onChange={(e) => patchClipStyle({ use_music: e.target.checked })}
+                            />
+                            <strong>Background music</strong>
+                            <span>Uses the Music URL from Settings</span>
+                          </label>
+                        </div>
+                        <div className="gta-form-grid" style={{ marginTop: '0.75rem' }}>
+                          <div className="gta-field">
+                            <label>Logo position</label>
+                            <select
+                              value={clipForm.logo_position}
+                              disabled={!clipForm.show_logo}
+                              onChange={(e) => patchClipStyle({ logo_position: e.target.value })}
+                            >
+                              <option value="top_right">Top right</option>
+                              <option value="top_left">Top left</option>
+                              <option value="bottom_right">Bottom right</option>
+                              <option value="bottom_left">Bottom left</option>
+                            </select>
+                          </div>
+                          <div className="gta-field">
+                            <label>Logo size ({clipForm.logo_size}px)</label>
+                            <input
+                              type="range"
+                              min={80}
+                              max={280}
+                              step={10}
+                              value={clipForm.logo_size}
+                              disabled={!clipForm.show_logo}
+                              onChange={(e) => patchClipStyle({ logo_size: Number(e.target.value) })}
+                            />
+                          </div>
+                        </div>
+                        {(!studio?.settings?.logo_url || !studio?.settings?.music_url) && (
+                          <p className="gta-note" style={{ marginTop: '0.65rem' }}>
+                            Missing assets won’t break the job — those overlays are simply skipped until you add URLs in Settings.
+                          </p>
+                        )}
+                      </section>
+                    )}
+                  </div>
+
+                  <aside className="gta-style-preview" aria-hidden="true">
+                    <div className={`gta-phone-mock tmpl-${clipForm.template}`}>
+                      {clipForm.add_intro && <div className="intro-bar">INTRO</div>}
+                      {clipForm.template === 'reaction_stack' ? (
+                        <>
+                          <div className="pane top" style={{ flex: clipForm.split_ratio }}>Reaction</div>
+                          <div className="pane bot" style={{ flex: 1 - clipForm.split_ratio }}>Gameplay</div>
+                        </>
+                      ) : (
+                        <div className="pane full">Vertical clip</div>
+                      )}
+                      {clipForm.burn_captions && (
+                        <div className={`cap cap-${clipForm.caption_position} cap-${clipForm.caption_size}`}>
+                          captions
+                        </div>
+                      )}
+                      {clipForm.show_logo && (
+                        <div className={`logo-dot pos-${clipForm.logo_position}`} />
+                      )}
+                      {clipForm.add_end_card && <div className="end-bar">END</div>}
+                    </div>
+                    <div className="gta-style-summary">
+                      <div><strong>Preset</strong> {clipForm.preset}</div>
+                      <div><strong>Layout</strong> {CLIP_TEMPLATES.find((t) => t.id === clipForm.template)?.label}</div>
+                      <div>
+                        <strong>Captions</strong>{' '}
+                        {clipForm.burn_captions
+                          ? `${clipForm.caption_style} · ${clipForm.caption_position}`
+                          : 'off'}
+                      </div>
+                      <div>
+                        <strong>Extras</strong>{' '}
+                        {[
+                          clipForm.add_intro && 'intro',
+                          clipForm.add_end_card && 'end card',
+                          clipForm.show_logo && 'logo',
+                          clipForm.use_music && 'music',
+                        ].filter(Boolean).join(' · ') || 'none'}
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+              </>
+            )}
+          </section>
+
+          <section className="gta-clip-step">
+            <div className="gta-clip-step-head">
+              <h3><span>3</span> Generate</h3>
+            </div>
+            <div className="gta-actions gta-generate-actions">
+              <button
+                type="button"
+                className="ap-btn primary"
+                disabled={!!busy || !clipForm.source_url.trim()}
+                onClick={() => {
+                  run('clipurl', async () => {
+                    showToast?.('Downloading video — this can take a few minutes…', 'success');
+                    const data = await apiFetch('/api/clips/jobs', {
                       method: 'POST',
-                      body: JSON.stringify({
-                        video_id: uploaded.video?.id,
-                        streamer_name: clipForm.streamer_name,
-                        clip_count: clipForm.clip_count,
-                        target_duration_sec: clipForm.target_duration_sec,
-                        template: clipForm.template,
-                        source_id: clipForm.source_id,
-                        created_by: actor,
-                      }),
+                      body: JSON.stringify(clipJobBody(clipForm, actor, {
+                        source_url: clipForm.source_url.trim(),
+                      })),
                     });
-                    showToast?.('Clipping job started', 'success');
+                    setFocusJobId(data.job?.id || '');
+                    setShowAllReviews(false);
+                    showToast?.('Clipping job started — showing only this batch in Review', 'success');
+                    setClipForm((prev) => ({ ...prev, source_url: '' }));
                     setNav('review');
                   });
                 }}
-              />
-            </label>
-          </div>
-
-          {(studio?.jobs || []).filter((j) => j.type === 'clip_job').slice(0, 5).map((job) => (
-            <div key={job.id} className="gta-job-row" style={{ marginTop: '0.75rem' }}>
-              <div className="gta-job-row-main">
-                <h4>{job.name}</h4>
-                <JobProgress job={job} />
-              </div>
-              <span className={`gta-badge ${statusBadge(job.status)}`}>{job.status}</span>
+              >
+                {busy === 'clipurl' ? 'Downloading & queuing…' : 'Import URL & generate clips'}
+              </button>
+              <label className="ap-btn secondary gta-upload-btn">
+                {busy === 'clipupload' ? 'Uploading & queuing…' : 'Or upload MP4 / MOV'}
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/*"
+                  hidden
+                  disabled={!!busy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    run('clipupload', async () => {
+                      const uploaded = await apiUpload(
+                        '/api/videos/upload',
+                        file,
+                        {
+                          kind: 'streamer',
+                          name: file.name,
+                          streamer_name: clipForm.streamer_name,
+                          source_id: clipForm.source_id,
+                          created_by: actor,
+                        },
+                      );
+                      const data = await apiFetch('/api/clips/jobs', {
+                        method: 'POST',
+                        body: JSON.stringify(clipJobBody(clipForm, actor, {
+                          video_id: uploaded.video?.id,
+                        })),
+                      });
+                      setFocusJobId(data.job?.id || '');
+                      setShowAllReviews(false);
+                      showToast?.('Clipping job started — showing only this batch in Review', 'success');
+                      setNav('review');
+                    });
+                  }}
+                />
+              </label>
             </div>
-          ))}
+            <p className="gta-note">
+              Long YouTube videos take longer to download. Keep this tab open until the job is queued, then check Review.
+            </p>
+          </section>
 
-          <h2 style={{ marginTop: '1.25rem' }}>Clip candidates</h2>
-          {(studio?.clips || []).length === 0 ? (
-            <AdminEmptyState
-              icon="cut"
-              title="No clips yet"
-              description="Upload a long streamer recording to generate scored short clips for review."
-            />
-          ) : (
-            <div className="gta-review-grid" style={{ marginTop: '0.75rem' }}>
-              {(studio?.clips || []).map((clip) => {
-                const draft = regenDraft[clip.id] || {
-                  start_sec: clip.source_start_sec ?? 0,
-                  end_sec: clip.source_end_sec ?? (clip.duration_sec || 30),
-                };
-                return (
-                  <div key={clip.id} className="gta-review-card">
-                    {clip.url ? (
-                      <div className="gta-video-frame">
-                        <video src={clip.url} controls playsInline preload="metadata" />
-                      </div>
-                    ) : null}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                      <h4 style={{ margin: 0 }}>{clip.title || 'Clip'}</h4>
-                      {clip.score != null && <span className="gta-score">{clip.score}</span>}
+          <section className="gta-clip-step gta-clip-jobs">
+            <div className="gta-clip-step-head">
+              <h3>Recent clip jobs</h3>
+            </div>
+            {(studio?.jobs || []).filter((j) => j.type === 'clip_job').length === 0 ? (
+              <AdminEmptyState
+                icon="cut"
+                title="No clip jobs yet"
+                description="Add a URL above (or upload a file), set your style, then generate."
+              />
+            ) : (
+              <div className="gta-job-list">
+                {(studio?.jobs || []).filter((j) => j.type === 'clip_job').slice(0, 8).map((job) => (
+                  <div key={job.id} className="gta-job-row">
+                    <div className="gta-job-row-main">
+                      <h4>{job.name}</h4>
+                      <JobProgress job={job} />
                     </div>
-                    <div className="gta-meta">
-                      {formatSec(clip.duration_sec)}
-                      {clip.source_start_sec != null ? ` · source ${formatSec(clip.source_start_sec)}–${formatSec(clip.source_end_sec)}` : ''}
-                    </div>
-                    {clip.caption ? <p className="gta-note">{clip.caption}</p> : null}
-                    {clip.reason ? <p className="gta-note">{clip.reason}</p> : null}
-                    <span className={`gta-badge ${statusBadge(clip.status)}`}>{clip.status}</span>
-
-                    <div className="gta-regen">
-                      <div className="gta-field">
-                        <label>Start</label>
-                        <input
-                          type="number"
-                          value={draft.start_sec}
-                          onChange={(e) => setRegenDraft((d) => ({
-                            ...d,
-                            [clip.id]: { ...draft, start_sec: Number(e.target.value) },
-                          }))}
-                        />
-                      </div>
-                      <div className="gta-field">
-                        <label>End</label>
-                        <input
-                          type="number"
-                          value={draft.end_sec}
-                          onChange={(e) => setRegenDraft((d) => ({
-                            ...d,
-                            [clip.id]: { ...draft, end_sec: Number(e.target.value) },
-                          }))}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className="ap-btn secondary"
-                        disabled={!!busy}
-                        onClick={() => run(`regen-${clip.id}`, async () => {
-                          await apiFetch(`/api/clips/${clip.id}/regenerate`, {
-                            method: 'POST',
-                            body: JSON.stringify({
-                              start_sec: draft.start_sec,
-                              end_sec: draft.end_sec,
-                              template: clip.template || clipForm.template,
-                            }),
-                          });
-                          showToast?.('Clip regenerated', 'success');
-                        })}
-                      >
-                        Regenerate
-                      </button>
-                    </div>
-
-                    <div className="gta-actions" style={{ marginTop: 0 }}>
-                      {clip.url && (
-                        <a className="ap-btn secondary" href={clip.url} target="_blank" rel="noreferrer" download>
-                          Download
-                        </a>
+                    <div className="gta-job-row-side">
+                      <span className={`gta-badge ${statusBadge(job.status)}`}>{job.status}</span>
+                      {job.payload?.video_id && !['queued', 'processing'].includes(String(job.status || '').toLowerCase()) && (
+                        <button
+                          type="button"
+                          className="ap-btn secondary"
+                          disabled={!!busy}
+                          onClick={() => rerunClipJob(job)}
+                        >
+                          {busy === `rerun-${job.id}` ? 'Rerunning…' : 'Rerun'}
+                        </button>
                       )}
-                      <button
-                        type="button"
-                        className="ap-btn primary"
-                        onClick={() => run('approveclip', async () => {
-                          await apiFetch(`/api/clips/${clip.id}/approve`, { method: 'POST' });
-                        })}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="ap-btn secondary"
-                        onClick={() => run('rejectclip', async () => {
-                          await apiFetch(`/api/clips/${clip.id}/reject`, { method: 'POST' });
-                        })}
-                      >
-                        Reject
-                      </button>
+                      {(job.status === 'complete' || job.status === 'completed' || job.status === 'failed') && (
+                        <button
+                          type="button"
+                          className="ap-btn secondary"
+                          onClick={() => {
+                            setFocusJobId(job.id);
+                            setShowAllReviews(false);
+                            setNav('review');
+                          }}
+                        >
+                          Open
+                        </button>
+                      )}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       )}
 
@@ -1115,106 +1703,321 @@ export default function GTAClipperApp({
       )}
 
       {nav === 'review' && (
-        <div className="gta-panel">
-          <div className="gta-panel-head">
-            <div>
-              <h2>Review desk</h2>
-              <p className="gta-note" style={{ marginTop: 4 }}>
-                Approve, reject, download, or email finished videos. Nothing publishes automatically.
-              </p>
+        <div className="gta-manage">
+          <div className="gta-panel">
+            <div className="gta-panel-head">
+              <div>
+                <h2>Review & manage</h2>
+                <p className="gta-note gta-panel-lead">
+                  Select a run on the left, watch clips on the right, then approve or delete. Source videos live at the bottom.
+                </p>
+              </div>
+              <div className="gta-actions" style={{ marginTop: 0 }}>
+                <button
+                  type="button"
+                  className="ap-btn secondary"
+                  onClick={() => setShowAllReviews((v) => !v)}
+                >
+                  {showAllReviews ? 'Filter to selected run' : 'Show all clips'}
+                </button>
+                <button type="button" className="ap-btn primary" onClick={() => setNav('clips')}>
+                  New clip job
+                </button>
+              </div>
             </div>
           </div>
 
-          {(studio?.exports || []).length === 0 && (studio?.clips || []).length === 0 ? (
-            <AdminEmptyState
-              icon="check-double"
-              title="Nothing to review"
-              description="Finished explainers and streamer clips show up here."
-            />
-          ) : (
-            <div className="gta-review-grid">
-              {(studio?.exports || []).map((exp) => (
-                <div key={exp.id} className="gta-review-card">
-                  {exp.url ? (
-                    <div className="gta-video-frame">
-                      <video src={exp.url} controls playsInline preload="metadata" />
-                    </div>
-                  ) : null}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <h4 style={{ margin: 0 }}>{exp.title || exp.name}</h4>
-                    {exp.score != null && <span className="gta-score">{exp.score}</span>}
-                  </div>
-                  <div className="gta-meta">
-                    {exp.pipeline} · {formatSec(exp.duration_sec)} · {exp.template}
-                    {exp.source_timestamp ? ` · ${exp.source_timestamp}` : ''}
-                    {formatMoney(exp.cost_estimate) ? ` · ${formatMoney(exp.cost_estimate)}` : ''}
-                  </div>
-                  {exp.caption ? <p className="gta-note">{exp.caption}</p> : null}
-                  <span className={`gta-badge ${statusBadge(exp.status)}`}>{exp.status}</span>
-                  <div className="gta-actions">
-                    {exp.url && (
-                      <a className="ap-btn secondary" href={exp.url} target="_blank" rel="noreferrer" download>
-                        Download
-                      </a>
+          <div className="gta-manage-grid">
+            <div className="gta-panel gta-manage-sidebar">
+              <h3>Runs</h3>
+              {clipJobs.length === 0 ? (
+                <div className="gta-note">No runs yet.</div>
+              ) : (
+                <div className="gta-run-list">
+                  {clipJobs.map((job) => {
+                    const clipN = (studio?.clips || []).filter((c) => c.job_id === job.id).length;
+                    const exportN = (studio?.exports || []).filter((e) => e.job_id === job.id).length;
+                    const active = !showAllReviews && job.id === latestClipJobId;
+                    return (
+                      <div key={job.id} className={`gta-run-card${active ? ' active' : ''}`}>
+                        <button
+                          type="button"
+                          className="gta-run-select"
+                          onClick={() => {
+                            setFocusJobId(job.id);
+                            setShowAllReviews(false);
+                          }}
+                        >
+                          <div className="gta-run-title">{job.name}</div>
+                          <div className="gta-meta">
+                            {(job.type || '').replace(/_/g, ' ')}
+                            {job.created_at ? ` · ${new Date(job.created_at).toLocaleString()}` : ''}
+                          </div>
+                          <JobProgress job={job} />
+                          <div className="gta-run-stats">
+                            <span className={`gta-badge ${statusBadge(job.status)}`}>{job.status}</span>
+                            <span className="gta-meta">{exportN || clipN} clips</span>
+                          </div>
+                        </button>
+                        <div className="gta-run-actions">
+                          {job.type === 'clip_job' && job.payload?.video_id && !['queued', 'processing'].includes(String(job.status || '').toLowerCase()) && (
+                            <button
+                              type="button"
+                              className="ap-btn secondary"
+                              disabled={!!busy}
+                              onClick={() => rerunClipJob(job)}
+                            >
+                              {busy === `rerun-${job.id}` ? 'Rerunning…' : 'Rerun same video'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="ap-btn secondary gta-run-delete"
+                            disabled={!!busy}
+                            onClick={() => deleteRun(job.id)}
+                          >
+                            Delete run
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <h3 style={{ marginTop: '1.25rem' }}>Source videos</h3>
+              {(studio?.videos || []).length === 0 ? (
+                <div className="gta-note">No uploaded / imported videos yet.</div>
+              ) : (
+                <div className="gta-video-manage-list">
+                  {(studio?.videos || []).map((v) => {
+                    const usedBy = clipJobs.filter((j) => (j.payload || {}).video_id === v.id).length;
+                    return (
+                      <div key={v.id} className="gta-video-manage-row">
+                        <div className="gta-card-main">
+                          <h4>{v.name || 'Video'}</h4>
+                          <div className="gta-meta">
+                            {v.kind || 'video'}
+                            {v.streamer_name ? ` · ${v.streamer_name}` : ''}
+                            {v.duration_sec ? ` · ${formatSec(v.duration_sec)}` : ''}
+                            {` · ${usedBy} run${usedBy === 1 ? '' : 's'}`}
+                          </div>
+                          {v.url ? (
+                            <a className="gta-meta" href={v.url} target="_blank" rel="noreferrer">Open source</a>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className="ap-btn secondary"
+                          disabled={!!busy}
+                          onClick={() => deleteSourceVideo(v.id, v.name)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="gta-panel">
+              <div className="gta-panel-head">
+                <div>
+                  <h3>
+                    {showAllReviews
+                      ? 'All clips'
+                      : (focusedJob?.name || 'Selected run')}
+                  </h3>
+                  <p className="gta-note" style={{ marginTop: 4 }}>
+                    {showAllReviews
+                      ? `${reviewExports.length} clips across all runs`
+                      : focusedJob
+                        ? `${reviewExports.length} clips in this run${focusedJobClipCount ? ` · ${focusedJobClipCount} clip records` : ''}`
+                        : 'Select a run on the left'}
+                  </p>
+                </div>
+                {!showAllReviews && focusedJob && (
+                  <div className="gta-actions" style={{ marginTop: 0 }}>
+                    {focusedJob.type === 'clip_job' && focusedJob.payload?.video_id && !['queued', 'processing'].includes(String(focusedJob.status || '').toLowerCase()) && (
+                      <button
+                        type="button"
+                        className="ap-btn primary"
+                        disabled={!!busy}
+                        onClick={() => rerunClipJob(focusedJob)}
+                      >
+                        {busy === `rerun-${focusedJob.id}` ? 'Rerunning…' : 'Rerun same video'}
+                      </button>
                     )}
                     <button
                       type="button"
-                      className="ap-btn primary"
-                      onClick={() => run('approveExport', async () => {
-                        await apiFetch(`/api/exports/${exp.id}/approve`, { method: 'POST' });
-                        showToast?.('Approved', 'success');
-                      })}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
                       className="ap-btn secondary"
-                      onClick={() => run('rejectExport', async () => {
-                        await apiFetch(`/api/exports/${exp.id}/reject`, { method: 'POST' });
-                      })}
+                      disabled={!!busy}
+                      onClick={() => deleteRun(focusedJob.id)}
                     >
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      className="ap-btn secondary"
-                      onClick={() => run('emailExport', async () => {
-                        const email = window.prompt('Email to', settings.notify_email || '');
-                        if (!email) return;
-                        await apiFetch(`/api/exports/${exp.id}/email`, {
-                          method: 'POST',
-                          body: JSON.stringify({ to_email: email }),
-                        });
-                        showToast?.('Email sent', 'success');
-                      })}
-                    >
-                      Email
+                      Delete this run
                     </button>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <h2 style={{ marginTop: '1.35rem' }}>Active & recent jobs</h2>
-          <div className="gta-job-list">
-            {(studio?.jobs || []).slice(0, 12).map((job) => (
-              <div key={job.id} className="gta-job-row">
-                <div className="gta-job-row-main">
-                  <h4>{job.name}</h4>
-                  <JobProgress job={job} />
-                </div>
-                <span className={`gta-badge ${statusBadge(job.status)}`}>{job.status}</span>
+                )}
               </div>
-            ))}
+
+              {focusedJob && !showAllReviews && (
+                <div className="gta-job-row" style={{ marginBottom: '0.85rem' }}>
+                  <div className="gta-job-row-main">
+                    <h4>{focusedJob.name}</h4>
+                    <JobProgress job={focusedJob} />
+                  </div>
+                  <span className={`gta-badge ${statusBadge(focusedJob.status)}`}>{focusedJob.status}</span>
+                </div>
+              )}
+
+              {reviewExports.length === 0 ? (
+                <AdminEmptyState
+                  icon="check-double"
+                  title={showAllReviews ? 'Nothing to review' : 'No clips in this run yet'}
+                  description={
+                    showAllReviews
+                      ? 'Generate streamer clips or an explainer to populate this desk.'
+                      : 'Wait for the job to finish rendering, or pick another run.'
+                  }
+                  ctaLabel="Make streamer clips"
+                  onCta={() => setNav('clips')}
+                />
+              ) : (
+                <div className="gta-review-grid">
+                  {reviewExports.map((exp) => {
+                    const linkedClip = exp.clip_id
+                      ? (studio?.clips || []).find((c) => c.id === exp.clip_id)
+                      : null;
+                    const draft = linkedClip
+                      ? (regenDraft[linkedClip.id] || {
+                        start_sec: linkedClip.source_start_sec ?? 0,
+                        end_sec: linkedClip.source_end_sec ?? (linkedClip.duration_sec || 30),
+                      })
+                      : null;
+                    return (
+                      <div key={exp.id} className="gta-review-card">
+                        {exp.url ? <ReviewVideo src={exp.url} /> : null}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <h4 style={{ margin: 0 }}>{exp.title || exp.name}</h4>
+                          {exp.score != null && (
+                            <span className="gta-score" title="Virality score">
+                              {Number(exp.score).toFixed(Number(exp.score) % 1 ? 1 : 0)}
+                              <small>/100</small>
+                            </span>
+                          )}
+                        </div>
+                        <div className="gta-meta">
+                          {(exp.pipeline || '').replace(/_/g, ' ')} · {formatSec(exp.duration_sec)}
+                          {exp.source_timestamp ? ` · ${exp.source_timestamp}` : ''}
+                          {formatMoney(exp.cost_estimate) ? ` · ${formatMoney(exp.cost_estimate)}` : ''}
+                        </div>
+                        {exp.caption ? <p className="gta-note">{exp.caption}</p> : null}
+                        <span className={`gta-badge ${statusBadge(exp.status)}`}>{exp.status}</span>
+                        {linkedClip && draft && (
+                          <div className="gta-regen">
+                            <div className="gta-field">
+                              <label>Start</label>
+                              <input
+                                type="number"
+                                value={draft.start_sec}
+                                onChange={(e) => setRegenDraft((d) => ({
+                                  ...d,
+                                  [linkedClip.id]: { ...draft, start_sec: Number(e.target.value) },
+                                }))}
+                              />
+                            </div>
+                            <div className="gta-field">
+                              <label>End</label>
+                              <input
+                                type="number"
+                                value={draft.end_sec}
+                                onChange={(e) => setRegenDraft((d) => ({
+                                  ...d,
+                                  [linkedClip.id]: { ...draft, end_sec: Number(e.target.value) },
+                                }))}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              className="ap-btn secondary"
+                              disabled={!!busy}
+                              onClick={() => run(`regen-${linkedClip.id}`, async () => {
+                                await apiFetch(`/api/clips/${linkedClip.id}/regenerate`, {
+                                  method: 'POST',
+                                  body: JSON.stringify({
+                                    start_sec: draft.start_sec,
+                                    end_sec: draft.end_sec,
+                                    template: linkedClip.template || clipForm.template,
+                                  }),
+                                });
+                                showToast?.('Clip regenerated', 'success');
+                              })}
+                            >
+                              Regenerate
+                            </button>
+                          </div>
+                        )}
+                        <div className="gta-actions">
+                          {exp.url && (
+                            <a className="ap-btn secondary" href={exp.url} target="_blank" rel="noreferrer" download>
+                              Download
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            className="ap-btn primary"
+                            disabled={exp.status === 'approved'}
+                            onClick={() => run('approveExport', async () => {
+                              await apiFetch(`/api/exports/${exp.id}/approve`, { method: 'POST' });
+                              showToast?.('Approved', 'success');
+                            })}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="ap-btn secondary"
+                            disabled={exp.status === 'rejected'}
+                            onClick={() => run('rejectExport', async () => {
+                              await apiFetch(`/api/exports/${exp.id}/reject`, { method: 'POST' });
+                              showToast?.('Rejected', 'success');
+                            })}
+                          >
+                            Reject
+                          </button>
+                          <button
+                            type="button"
+                            className="ap-btn secondary"
+                            disabled={!!busy}
+                            onClick={() => deleteExportCard(exp)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {nav === 'settings' && settingsDraft && (
         <div className="gta-panel">
-          <h2>Studio settings</h2>
+          <div className="gta-panel-head">
+            <div>
+              <h2>Studio settings</h2>
+              <p className="gta-note gta-panel-lead">
+                Logo and music here power the Overlays toggles on Streamer clips. Set them once, then turn them on per job.
+              </p>
+            </div>
+            <button type="button" className="ap-btn secondary" onClick={() => setNav('clips')}>
+              Back to clips
+            </button>
+          </div>
           <div className="gta-form-grid">
             <div className="gta-field">
               <label>Channel name</label>
@@ -1224,7 +2027,7 @@ export default function GTAClipperApp({
               />
             </div>
             <div className="gta-field">
-              <label>Default template</label>
+              <label>Default explainer template</label>
               <select
                 value={settingsDraft.default_template || 'facecam_top'}
                 onChange={(e) => setSettingsDraft({ ...settingsDraft, default_template: e.target.value })}
@@ -1233,19 +2036,22 @@ export default function GTAClipperApp({
               </select>
             </div>
             <div className="gta-field full">
-              <label>Logo URL</label>
+              <label>Logo URL (watermark overlay)</label>
               <input
                 value={settingsDraft.logo_url || ''}
                 onChange={(e) => setSettingsDraft({ ...settingsDraft, logo_url: e.target.value })}
                 placeholder="https://…/logo.png"
               />
+              <p className="gta-field-hint">Used when “Logo watermark” is on in Streamer clips → Overlays.</p>
             </div>
             <div className="gta-field full">
               <label>Background music URL</label>
               <input
                 value={settingsDraft.music_url || ''}
                 onChange={(e) => setSettingsDraft({ ...settingsDraft, music_url: e.target.value })}
+                placeholder="https://…/track.mp3"
               />
+              <p className="gta-field-hint">Used when “Background music” is on in Streamer clips → Overlays.</p>
             </div>
             <div className="gta-field">
               <label>Music volume (0–1)</label>
